@@ -7,6 +7,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -36,6 +38,7 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashHandler.install(applicationContext)
         setContent { App() }
     }
 }
@@ -59,11 +62,33 @@ fun App() {
     var status by remember { mutableStateOf("正在初始化…") }
     var total by remember { mutableIntStateOf(0) }
 
+    var err by remember { mutableStateOf<String?>(null) }
+
     LaunchedEffect(Unit) {
-        total = withContext(Dispatchers.IO) {
-            Importer.ensure(ctx) { s -> status = s }
+        try {
+            total = withContext(Dispatchers.IO) {
+                Importer.ensure(ctx) { s -> status = s }
+            }
+            ready = true
+        } catch (t: Throwable) {
+            val sw = java.io.StringWriter()
+            t.printStackTrace(java.io.PrintWriter(sw))
+            err = sw.toString().take(2500)
         }
-        ready = true
+    }
+
+    // 初始化失败 → 直接显示错误（避免"无提示闪退"）
+    err?.let { e ->
+        Column(
+            Modifier.fillMaxSize().background(Theme.bg).padding(16.dp).verticalScroll(rememberScrollState())
+        ) {
+            Text("启动失败", color = Theme.pink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(10.dp))
+            Text(e, color = Color(0xFFFF8888), fontSize = 11.sp)
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = { err = null; ready = false }) { Text("重试") }
+        }
+        return
     }
 
     if (!ready) {
@@ -288,5 +313,17 @@ fun MeScreen(total: Int) {
         Text("卡库：$total 张", color = Theme.pink, fontSize = 13.sp)
         Spacer(Modifier.height(2.dp))
         Text("作者：无聊", color = Color(0xFF8A82A0), fontSize = 12.sp)
+        Spacer(Modifier.height(20.dp))
+
+        val ctx2 = LocalContext.current
+        var logTxt by remember { mutableStateOf<String?>(null) }
+        OutlinedButton(onClick = { logTxt = CrashHandler.readRecent(ctx2).ifBlank { "（无崩溃记录）" } }) {
+            Text("查看崩溃日志")
+        }
+        logTxt?.let { t ->
+            Spacer(Modifier.height(12.dp))
+            Text(t, color = Color(0xFFFF9999), fontSize = 10.sp,
+                 modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()))
+        }
     }
 }

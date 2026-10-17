@@ -53,11 +53,26 @@ class CardDb private constructor(ctx: Context) :
               id TEXT PRIMARY KEY, opening TEXT, setting TEXT,
               generic TEXT, creator TEXT, media TEXT)
         """)
-        db.execSQL("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts
-            USING fts5(name, summary, id UNINDEXED, tokenize='trigram')
-        """)
+        // FTS5 按可用性依次降级（trigram 需 SQLite 3.34+，老机型会抛异常）
+        createFts(db)
         db.execSQL("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)")
+    }
+
+    /** 按能力降级创建全文索引，全失败则跳过（搜索回落 LIKE） */
+    private fun createFts(db: SQLiteDatabase) {
+        val candidates = listOf(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts USING fts5(name, summary, id UNINDEXED, tokenize='trigram')",
+            "CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts USING fts5(name, summary, id UNINDEXED, tokenize='unicode61')",
+            "CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts USING fts5(name, summary)"
+        )
+        for (sql in candidates) {
+            try {
+                db.execSQL(sql)
+                return
+            } catch (e: Throwable) {
+                try { db.execSQL("DROP TABLE IF EXISTS cards_fts") } catch (_: Throwable) {}
+            }
+        }
     }
 
     override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) { }
