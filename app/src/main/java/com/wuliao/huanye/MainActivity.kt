@@ -23,6 +23,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import com.wuliao.huanye.data.*
 import com.wuliao.huanye.ui.*
 import kotlinx.coroutines.Dispatchers
@@ -133,7 +134,7 @@ fun AppNav(nav: NavHostController, total: Int) {
 
         // 底栏只在根页面显示
         val cur = nav.currentBackStackEntryAsState().value?.destination?.route
-        if (cur != null && cur.startsWith("detail/").not()) {
+        if (cur != null && !cur.startsWith("detail/")) {
             BottomBar(rootTab) { route ->
                 if (route != rootTab) {
                     rootTab = route

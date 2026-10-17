@@ -14,7 +14,7 @@ data class Card(
     val src: String,
     val cat: String
 ) {
-    val srcName: String get() = SRC_NAMES[src] ?: src
+    val srcName: String get() = CardDb.SRC_NAMES[src] ?: src
 }
 
 data class Detail(
