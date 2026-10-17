@@ -20,9 +20,15 @@ object Importer {
     suspend fun ensure(ctx: Context, onProgress: (String) -> Unit = {}): Int =
         withContext(Dispatchers.IO) {
             val db = CardDb.get(ctx)
-            if (db.isImported()) {
-                onProgress("卡库已就绪")
-                return@withContext db.count(null, null)
+            // 建表本身也可能失败（老机型/畸形 ROM）→ 捕获后返回 0，让界面能进
+            try {
+                if (db.isImported()) {
+                    onProgress("卡库已就绪")
+                    return@withContext db.count(null, null)
+                }
+            } catch (t: Throwable) {
+                onProgress("数据库不可用: ${t.javaClass.simpleName}")
+                throw t
             }
 
             var done = 0
@@ -113,7 +119,7 @@ object Importer {
             }
 
             onProgress("建立搜索索引…")
-            try { db.rebuildFts() } catch (e: Throwable) { }
+            db.markImported()
 
             onProgress("完成！共 $done 张卡")
             db.count(null, null)

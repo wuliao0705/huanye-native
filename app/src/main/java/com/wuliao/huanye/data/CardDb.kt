@@ -27,7 +27,7 @@ data class Detail(
 )
 
 /**
- * 卡库 SQLite（FTS5 全文）
+ * 卡库 SQLite（不依赖 FTS5 —— 许多 Android 系统 SQLite 未编译该模块）
  * @author 无聊
  */
 class CardDb private constructor(ctx: Context) :
@@ -53,29 +53,18 @@ class CardDb private constructor(ctx: Context) :
               id TEXT PRIMARY KEY, opening TEXT, setting TEXT,
               generic TEXT, creator TEXT, media TEXT)
         """)
-        // FTS5 按可用性依次降级（trigram 需 SQLite 3.34+，老机型会抛异常）
-        createFts(db)
+        // 普通 B-Tree 索引（FTS5 在多数 Android 系统 SQLite 中不可用）
+        db.execSQL("CREATE INDEX IF NOT EXISTS i_name ON cards(name)")
         db.execSQL("CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)")
     }
 
-    /** 按能力降级创建全文索引，全失败则跳过（搜索回落 LIKE） */
-    private fun createFts(db: SQLiteDatabase) {
-        val candidates = listOf(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts USING fts5(name, summary, id UNINDEXED, tokenize='trigram')",
-            "CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts USING fts5(name, summary, id UNINDEXED, tokenize='unicode61')",
-            "CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts USING fts5(name, summary)"
-        )
-        for (sql in candidates) {
-            try {
-                db.execSQL(sql)
-                return
-            } catch (e: Throwable) {
-                try { db.execSQL("DROP TABLE IF EXISTS cards_fts") } catch (_: Throwable) {}
-            }
-        }
+    override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) {
+        // 结构变更：清空重建（数据由 assets 重新导入）
+        db.execSQL("DROP TABLE IF EXISTS cards")
+        db.execSQL("DROP TABLE IF EXISTS details")
+        db.execSQL("DROP TABLE IF EXISTS meta")
+        onCreate(db)
     }
-
-    override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) { }
 
     // ───────── 写入 ─────────
 
@@ -89,14 +78,7 @@ class CardDb private constructor(ctx: Context) :
         } finally { db.endTransaction() }
     }
 
-    fun rebuildFts() {
-        val db = writableDatabase
-        db.beginTransaction()
-        try {
-            db.delete("cards_fts", null, null)
-            db.execSQL("INSERT INTO cards_fts(name, summary, id) SELECT name, summary, id FROM cards")
-            db.setTransactionSuccessful()
-        } finally { db.endTransaction() }
+    fun markImported() {
         writableDatabase.execSQL("INSERT OR REPLACE INTO meta(k,v) VALUES('imported','1')")
     }
 
@@ -158,25 +140,9 @@ class CardDb private constructor(ctx: Context) :
     }
 
     fun search(q: String, limit: Int): List<Card> {
-        val kw = q.replace("\"", "").trim()
+        val kw = q.replace("%", "").replace("_", "").trim()
         if (kw.isEmpty()) return emptyList()
-        // 先走 FTS（trigram 支持中文子串），失败退回 LIKE
-        return try {
-            val sql = """
-                SELECT c.id,c.name,c.cover,c.summary,c.tags,c.src,c.cat FROM cards_fts f
-                JOIN cards c ON c.id=f.id
-                WHERE cards_fts MATCH ? ORDER BY c.hot DESC LIMIT ?
-            """
-            readableDatabase.rawQuery(sql, arrayOf("%$kw%", limit.toString())).use { c ->
-                buildList {
-                    while (c.moveToNext()) add(
-                        Card(c.getString(0), c.getString(1), c.getString(2),
-                            c.getString(3) ?: "", c.getString(4) ?: "[]",
-                            c.getString(5), c.getString(6) ?: "")
-                    )
-                }
-            }.ifEmpty { searchLike(kw, limit) }
-        } catch (e: Exception) { searchLike(kw, limit) }
+        return searchLike(kw, limit)
     }
 
     private fun searchLike(kw: String, limit: Int): List<Card> {
@@ -215,7 +181,7 @@ class CardDb private constructor(ctx: Context) :
 
     companion object {
         private const val DB_NAME = "huanye.db"
-        private const val DB_VER = 1
+        private const val DB_VER = 2
 
         @Volatile private var inst: CardDb? = null
 
