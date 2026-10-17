@@ -19,20 +19,23 @@ android {
 
     signingConfigs {
         create("rel") {
-            storeFile = file("../keystore/huanye.p12")
-            storeType = "PKCS12"
-            storePassword = "huanye2026"
-            keyAlias = "huanye"
-            keyPassword = "huanye2026"
-            enableV1Signing = true
-            enableV2Signing = true
+            val ks = file("../keystore/huanye.jks")
+            if (ks.exists()) {
+                storeFile = ks
+                storePassword = "huanye2026"
+                keyAlias = "huanye"
+                keyPassword = "huanye2026"
+                enableV1Signing = true
+                enableV2Signing = true
+            }
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("rel")
+            signingConfig = if (file("../keystore/huanye.jks").exists())
+                signingConfigs.getByName("rel") else null
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

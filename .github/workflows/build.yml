@@ -25,12 +25,16 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Show project tree
+      - name: Generate signing keystore
         run: |
-          echo "--- 项目结构 ---"
-          find . -name "*.kts" -o -name "*.kt" -o -name "*.json" | head -30
-          echo "--- assets ---"
-          ls -la app/src/main/assets/ || true
+          mkdir -p keystore
+          keytool -genkeypair -v \
+            -keystore keystore/huanye.jks \
+            -alias huanye \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass huanye2026 -keypass huanye2026 \
+            -dname "CN=Wuliao, OU=Huanye, O=Wuliao, L=CN, ST=CN, C=CN"
+          ls -la keystore/
 
       - name: Build Release APK
         run: gradle :app:assembleRelease --stacktrace --no-daemon
