@@ -178,6 +178,18 @@ class CardDb private constructor(ctx: Context) :
         }
     }
 
+    /** 单张卡（详情页用） */
+    fun card(id: String): Card? =
+        readableDatabase.rawQuery(
+            "SELECT id,name,cover,summary,tags,src,cat FROM cards WHERE id=?", arrayOf(id)
+        ).use {
+            if (it.moveToFirst())
+                Card(it.getString(0), it.getString(1), it.getString(2),
+                    it.getString(3) ?: "", it.getString(4) ?: "[]",
+                    it.getString(5), it.getString(6) ?: "")
+            else null
+        }
+
     fun detail(id: String): Detail? =
         readableDatabase.rawQuery("SELECT id,opening,setting,generic,creator,media FROM details WHERE id=?", arrayOf(id)).use {
             if (it.moveToFirst())

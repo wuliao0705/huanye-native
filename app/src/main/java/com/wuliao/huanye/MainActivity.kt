@@ -1,12 +1,13 @@
 package com.wuliao.huanye
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,11 +19,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import com.wuliao.huanye.data.*
 import com.wuliao.huanye.ui.*
-import com.wuliao.huanye.ui.Theme
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -36,18 +39,24 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-enum class Tab { DISCOVER, LIBRARY, SEARCH, ME }
+/** 页面路由 */
+object Route {
+    const val DISCOVER = "discover"
+    const val LIBRARY = "library"
+    const val SEARCH = "search"
+    const val ME = "me"
+    const val DETAIL = "detail/{cardId}"
+    fun detail(id: String) = "detail/$id"
+}
 
 @Composable
 fun App() {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val nav = rememberNavController()
 
     var ready by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("正在初始化…") }
     var total by remember { mutableIntStateOf(0) }
-    var tab by remember { mutableStateOf(Tab.DISCOVER) }
-    var opened by remember { mutableStateOf<Card?>(null) }
 
     LaunchedEffect(Unit) {
         total = withContext(Dispatchers.IO) {
@@ -69,59 +78,168 @@ fun App() {
         return
     }
 
-    // 返回键：详情页 → 回列表；列表 → 首页；首页 → 再按退出
-    BackHandler(enabled = opened != null) { opened = null }
-    var lastBack by remember { mutableLongStateOf(0L) }
-    BackHandler(enabled = opened == null && tab != Tab.DISCOVER) { tab = Tab.DISCOVER }
+    // ★ 返回键在 NavHost 里按导航栈自动处理 ★
+    AppNav(nav, total)
+}
 
-    // 详情
-    opened?.let { c ->
-        DetailScreen(c) { opened = null }
-        return
+@Composable
+fun AppNav(nav: NavHostController, total: Int) {
+    val ctx = LocalContext.current
+    // 根页面当前 tab（用于底栏高亮与"再按一次退出"判定）
+    var rootTab by remember { mutableStateOf(Route.DISCOVER) }
+
+    // ★★ 核心修复：绑定 Activity 返回键 ★★
+    // NavHost 内部会自动注册 OnBackPressedCallback：
+    //   - 栈里有上一级 → popBackStack() → 回退（不退出 App）
+    //   - 栈空（在根页面）→ 回调返回 false → 系统默认行为
+    // 这里额外接管"根页面返回"：第一次提示，2 秒内第二次才退出。
+    var backAt by remember { mutableLongStateOf(0L) }
+
+    // 根页面（发现/卡库/搜索/我的）→ 拦截返回键
+    if (rootTab != Route.DISCOVER || nav.currentDestination?.route == Route.DISCOVER) {
+        // 只在当前确实处在根页面时才接管
     }
 
-    Scaffold(
-        containerColor = Theme.bg,
-        bottomBar = { BottomBar(tab) { tab = it } }
-    ) { pad ->
-        Box(Modifier.padding(pad).fillMaxSize()) {
-            when (tab) {
-                Tab.DISCOVER -> DiscoverScreen { opened = it }
-                Tab.LIBRARY -> LibraryScreen { opened = it }
-                Tab.SEARCH -> SearchScreen { opened = it }
-                Tab.ME -> MeScreen(total)
+    Column(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f)) {
+            NavHost(
+                navController = nav,
+                startDestination = Route.DISCOVER,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                composable(Route.DISCOVER) {
+                    RootBackHandler(nav, rootTab) { rootTab = Route.DISCOVER }
+                    DiscoverScreen { openDetail(nav, it) }
+                }
+                composable(Route.LIBRARY) {
+                    RootBackHandler(nav, rootTab) { rootTab = Route.LIBRARY }
+                    LibraryScreen { openDetail(nav, it) }
+                }
+                composable(Route.SEARCH) {
+                    RootBackHandler(nav, rootTab) { rootTab = Route.SEARCH }
+                    SearchScreen { openDetail(nav, it) }
+                }
+                composable(Route.ME) {
+                    RootBackHandler(nav, rootTab) { rootTab = Route.ME }
+                    MeScreen(total)
+                }
+                composable(Route.DETAIL) { entry ->
+                    val id = entry.arguments?.getString("cardId") ?: ""
+                    // ★ 详情页返回键：交给 NavHost → popBackStack 回上一级（不退出）
+                    DetailRoute(id) { nav.popBackStack() }
+                }
+            }
+        }
+
+        // 底栏只在根页面显示
+        val cur = nav.currentBackStackEntryAsState().value?.destination?.route
+        if (cur != null && cur.startsWith("detail/").not()) {
+            BottomBar(rootTab) { route ->
+                if (route != rootTab) {
+                    rootTab = route
+                    nav.navigate(route) {
+                        popUpTo(Route.DISCOVER) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
             }
         }
     }
 }
 
+/**
+ * 根页面的返回键处理：
+ * - 不在发现页 → 先回发现页（不退出）
+ * - 在发现页 → 第一次 Toast 提示，2 秒内再按才退出
+ */
 @Composable
-fun BottomBar(cur: Tab, click: (Tab) -> Unit) {
-    data class Item(val tab: Tab, val icon: String, val name: String)
+fun RootBackHandler(
+    nav: NavHostController,
+    curTab: String,
+    onTab: () -> Unit
+) {
+    val ctx = LocalContext.current
+    var lastAt by remember { mutableLongStateOf(0L) }
+
+    BackHandler(enabled = true) {
+        if (curTab != Route.DISCOVER) {
+            // 回发现页
+            onTab()
+            nav.navigate(Route.DISCOVER) {
+                popUpTo(Route.DISCOVER) { inclusive = true }
+                launchSingleTop = true
+            }
+        } else {
+            val now = System.currentTimeMillis()
+            if (now - lastAt < 2000) {
+                // 二次确认 → 放行退出
+                (ctx as? android.app.Activity)?.finish()
+            } else {
+                lastAt = now
+                Toast.makeText(ctx, "再按一次返回键退出幻夜", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+}
+
+/** 详情路由：从 DB 取卡，找不到就回退 */
+@Composable
+fun DetailRoute(cardId: String, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    var card by remember { mutableStateOf<Card?>(null) }
+    var miss by remember { mutableStateOf(false) }
+
+    LaunchedEffect(cardId) {
+        val c = withContext(Dispatchers.IO) { CardDb.get(ctx).card(cardId) }
+        if (c == null) miss = true else card = c
+    }
+
+    when {
+        miss -> {
+            // 卡不存在：返回键直接回上一级
+            BackHandler { onBack() }
+            Box(Modifier.fillMaxSize().background(Theme.bg), contentAlignment = Alignment.Center) {
+                Text("卡片不存在", color = Color(0xFF8A82A0))
+            }
+        }
+        card != null -> DetailScreen(card!!, onBack)
+        else -> Box(Modifier.fillMaxSize().background(Theme.bg)) { LoadingBox("加载中…") }
+    }
+}
+
+fun openDetail(nav: NavHostController, card: Card) {
+    nav.navigate(Route.detail(card.id))
+}
+
+@Composable
+fun BottomBar(cur: String, click: (String) -> Unit) {
+    data class Item(val tab: String, val icon: String, val name: String)
     val items = listOf(
-        Item(Tab.DISCOVER, "🏠", "发现"),
-        Item(Tab.LIBRARY, "📚", "卡库"),
-        Item(Tab.SEARCH, "🔍", "搜索"),
-        Item(Tab.ME, "👤", "我的")
+        Item(Route.DISCOVER, "🏠", "发现"),
+        Item(Route.LIBRARY, "📚", "卡库"),
+        Item(Route.SEARCH, "🔍", "搜索"),
+        Item(Route.ME, "👤", "我的")
     )
     Row(
         Modifier.fillMaxWidth().background(Color(0xFF1A1626)).padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
         items.forEach { it2 ->
-            val t = it2.tab
-            val icon = it2.icon
-            val name = it2.name
-            val on = t == cur
+            val on = it2.tab == cur
             Column(
                 Modifier.clip(RoundedCornerShape(10.dp))
-                    .clickable { click(t) }
+                    .clickable { click(it2.tab) }
                     .padding(horizontal = 16.dp, vertical = 2.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(icon, fontSize = 18.sp)
-                Text(name, color = if (on) Theme.pink else Color(0xFF8A82A0),
-                    fontSize = 10.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal)
+                Text(it2.icon, fontSize = 18.sp)
+                Text(
+                    it2.name,
+                    color = if (on) Theme.pink else Color(0xFF8A82A0),
+                    fontSize = 10.sp,
+                    fontWeight = if (on) FontWeight.Bold else FontWeight.Normal
+                )
             }
         }
     }
