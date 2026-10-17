@@ -53,7 +53,7 @@ fun DetailScreen(card: Card, onBack: () -> Unit) {
             Text("←", color = Color.White, fontSize = 22.sp,
                 modifier = Modifier.padding(end = 12.dp).clip(RoundedCornerShape(8.dp))
                     .background(Color(0x22FFFFFF)).padding(horizontal = 10.dp, vertical = 2.dp)
-                    .clickable(onBack))
+                    .clickable { onBack() })
             Text(card.name, color = Color.White, fontSize = 16.sp,
                 fontWeight = FontWeight.Bold, maxLines = 1,
                 modifier = Modifier.weight(1f))

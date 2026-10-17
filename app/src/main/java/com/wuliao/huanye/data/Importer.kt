@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.io.readText
 import org.json.JSONObject
 import java.io.InputStreamReader
 import java.util.zip.GZIPInputStream
@@ -34,7 +35,7 @@ object Importer {
             // ───── 卡表：{v, srcs:{src:{cat:[[id,name,cover,summary,tags]]}}, total} ─────
             onProgress("正在导入卡表…")
             try {
-                val txt = open(ctx, CARDS).bufferedReader().use { it.readText() }
+                val txt = open(ctx, CARDS).use { it.readText() }
                 val root = JSONObject(txt)
                 val srcs = root.optJSONObject("srcs")
                 if (srcs != null) {
@@ -81,7 +82,7 @@ object Importer {
             // ───── 详情：{id:[opening,setting,intro,author]} ─────
             onProgress("正在导入详情…")
             try {
-                val txt = open(ctx, DETAILS).bufferedReader().use { it.readText() }
+                val txt = open(ctx, DETAILS).use { it.readText() }
                 val root = JSONObject(txt)
                 var buf = ArrayList<ContentValues>(400)
                 var dd = 0
